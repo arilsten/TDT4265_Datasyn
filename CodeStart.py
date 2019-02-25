@@ -1,10 +1,19 @@
-import torch
 import os
 import matplotlib.pyplot as plt
+import torch
 from torch import nn
 from dataloaders import load_cifar10
 from utils import to_cuda, compute_loss_and_accuracy
 
+
+def init_weights(m):
+    if type(m) == torch.nn.Conv2d:
+        torch.nn.init.xavier_normal_(m.weight)
+        if m.bias is not None:
+            m.bias.data.fill_(0.0)
+    if type(m) == torch.nn.Linear:
+        torch.nn.init.xavier_normal_(m.weight)
+        m.bias.data.fill_(0.0)
 
 class ExampleModel(nn.Module):
 
@@ -18,30 +27,73 @@ class ExampleModel(nn.Module):
                 num_classes: Number of classes we want to predict (10)
         """
         super().__init__()
-        num_filters = 32  # Set number of filters in first conv layer
-
+        num_filters_conv = [32, 64, 128]  # Set number of filters in different conv layer
+        # Parameters
+        kernel_size_ = 3 # Org = 5, mod = 3,
+        padding_ = 1     # Org = 2, mod = 1,
+        stride_ = 1      # Org = 1, mod = 1,
         # Define the convolutional layers
         self.feature_extractor = nn.Sequential(
+	    # Layer 1
             nn.Conv2d(
                 in_channels=image_channels,
-                out_channels=num_filters,
-                kernel_size=5,
-                stride=1,
-                padding=2
+                out_channels=num_filters_conv[0],
+                kernel_size=kernel_size_,
+                stride=stride_,
+                padding=padding_
             ),
+            nn.ReLU(),
+            nn.BatchNorm2d(num_filters_conv[0]),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.ReLU()
+
+
+	    # Layer 2
+	    nn.Conv2d(
+                in_channels= num_filters_conv[0],
+                out_channels= num_filters_conv[1],
+                kernel_size=kernel_size_,
+                stride=stride_,
+                padding=padding_
+            ),
+            nn.ReLU(),
+            nn.BatchNorm2d(num_filters_conv[1]),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+
+
+	    # Layer 3
+	    nn.Conv2d(
+                in_channels=num_filters_conv[1],
+                out_channels=num_filters_conv[2],
+                kernel_size=kernel_size_,
+                stride=stride_,
+                padding=padding_
+            ),
+            nn.ReLU(),
+            nn.BatchNorm2d(num_filters_conv[2]),
+            nn.MaxPool2d(kernel_size=2, stride=2)
+
+
         )
         # The output of feature_extractor will be [batch_size, num_filters, 16, 16]
-        self.num_output_features = 32*16*16
+        self.num_output_features = 128*4*4
         # Initialize our last fully connected layer
         # Inputs all extracted features from the convolutional layers
         # Outputs num_classes predictions, 1 for each class.
         # There is no need for softmax activation function, as this is
         # included with nn.CrossEntropyLoss
         self.classifier = nn.Sequential(
-            nn.Linear(self.num_output_features, num_classes),
+            nn.Linear(self.num_output_features, 64),
+            nn.BatchNorm1d(64),
+	        nn.ReLU(),
+	        nn.Linear(64, num_classes),
+            nn.BatchNorm1d(num_classes)
         )
+
+        self.feature_extractor.apply(init_weights)
+        self.classifier.apply(init_weights)
+
+
+
 
     def forward(self, x):
         """
@@ -59,6 +111,7 @@ class ExampleModel(nn.Module):
         return x
 
 
+
 class Trainer:
 
     def __init__(self):
@@ -67,9 +120,9 @@ class Trainer:
         Set hyperparameters, architecture, tracking variables etc.
         """
         # Define hyperparameters
-        self.epochs = 100
+        self.epochs = 20
         self.batch_size = 64
-        self.learning_rate = 5e-2
+        self.learning_rate = 5e-3 # Org = 5e-2, Nice curve = 5e-4
         self.early_stop_count = 4
 
         # Architecture
@@ -81,9 +134,8 @@ class Trainer:
         # Transfer model to GPU VRAM, if possible.
         self.model = to_cuda(self.model)
 
-        # Define our optimizer. SGD = Stochastich Gradient Descent
-        self.optimizer = torch.optim.SGD(self.model.parameters(),
-                                         self.learning_rate)
+        # Define our optimizer. SGD = Stochastich Gradient Descent. Adam = Adam optimizer
+        self.optimizer = torch.optim.Adam(self.model.parameters(), self.learning_rate)
 
         # Load our dataset
         self.dataloader_train, self.dataloader_val, self.dataloader_test = load_cifar10(self.batch_size)
@@ -170,7 +222,7 @@ class Trainer:
 
                 # Gradient descent step
                 self.optimizer.step()
-                
+
                 # Reset all computed gradients to 0
                 self.optimizer.zero_grad()
                  # Compute loss/accuracy for all three datasets.
@@ -188,16 +240,16 @@ if __name__ == "__main__":
 
     os.makedirs("plots", exist_ok=True)
     # Save plots and show them
-    plt.figure(figsize=(12, 8))
+    plt.figure(1,figsize=(12, 8))
     plt.title("Cross Entropy Loss")
     plt.plot(trainer.VALIDATION_LOSS, label="Validation loss")
     plt.plot(trainer.TRAIN_LOSS, label="Training loss")
     plt.plot(trainer.TEST_LOSS, label="Testing Loss")
     plt.legend()
     plt.savefig(os.path.join("plots", "final_loss.png"))
-    plt.show()
+    #plt.show()
 
-    plt.figure(figsize=(12, 8))
+    plt.figure(2,figsize=(12, 8))
     plt.title("Accuracy")
     plt.plot(trainer.VALIDATION_ACC, label="Validation Accuracy")
     plt.plot(trainer.TRAIN_ACC, label="Training Accuracy")
